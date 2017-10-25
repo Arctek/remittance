@@ -1,0 +1,21 @@
+{
+  "name": "eth_splitter",
+  "version": "1.0.0",
+  "description": "B9 Lab Unit 4 Exercise 1",
+  "main": "truffle.js",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "test": "truffle test"
+  },
+  "author": "Joshua Richardson (Arctek)",
+  "license": "MIT",
+  "dependencies": {
+    "babel-polyfill": "^6.26.0",
+    "babel-preset-env": "^1.6.1",
+    "babel-register": "^6.26.0",
+    "bluebird": "^3.5.1",
+    "lodash": "^4.17.4"
+  }
+}
