@@ -102,7 +102,6 @@ contract Remittance is Killable{
         uint withdrawBalance = remittances[addressableHash].balance;
         remittances[addressableHash].balance = 0;
 
-        // Also be nice and clean up the blockchain state
         remittances[addressableHash].sender = 0;
         remittances[addressableHash].recipient = 0;
         remittances[addressableHash].deadlineBlock = 0;
@@ -127,10 +126,14 @@ contract Remittance is Killable{
         require(remittances[addressableHash].sender == msg.sender);
         require(remittances[addressableHash].recipient == recipient);
         require(remittances[addressableHash].balance > 0);
-        require(remittances[addressableHash].deadlineBlock >= block.number);
+        require(remittances[addressableHash].deadlineBlock <= block.number);
 
         uint withdrawBalance = remittances[addressableHash].balance;
         remittances[addressableHash].balance = 0;
+
+        remittances[addressableHash].sender = 0;
+        remittances[addressableHash].recipient = 0;
+        remittances[addressableHash].deadlineBlock = 0;
 
         msg.sender.transfer(withdrawBalance);
 

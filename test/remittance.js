@@ -14,13 +14,15 @@ web3.eth.expectedPayableExceptionPromise = require("../test_util/expectedPayable
 web3.eth.expectedExceptionPromise = require("../test_util/expectedExceptionPromise.js");
 web3.eth.makeSureAreUnlocked = require("../test_util/makeSureAreUnlocked.js");
 web3.eth.makeSureHasAtLeast = require("../test_util/makeSureHasAtLeast.js");
+web3.eth.calculateGasCost = require("../test_util/calculateGasCost.js");
+assert.topicContainsAddress = require("../test_util/topicContainsAddress.js");
 
 contract('Remittance', accounts => {
     const gasToUse = 3000000;
     const escrowAmount = new web3.BigNumber(Math.floor(Math.random() * 100000) + 1);
     const escrowFee = escrowAmount.dividedBy(100).round();
     const newEscrowFee = escrowAmount.dividedBy(22).round();
-    const deadlineBlock = new web3.BigNumber(Math.floor(Math.random() * 5) + 1);
+    const deadlineBlock = new web3.BigNumber(Math.floor(Math.random() * 5) + 5);
 
     const zeroAddress = ("0x").padEnd(42, 0);
     const zeroBigNumber = new web3.BigNumber(0);
@@ -51,103 +53,85 @@ contract('Remittance', accounts => {
     });
 
     describe("Main contract actions", () => {
-        it('should have set escrow fee properly', () => {
-                return contract.escrowFee()
-            .then(currentEscrowFee => { 
-                assert.strictEqual(escrowFee.equals(currentEscrowFee), true, "the initial escrow fee was not set") 
-            });
+        it('should have set escrow fee properly', async () => {
+            let currentEscrowFee = await contract.escrowFee();
+            
+            assert.deepEqual(escrowFee, currentEscrowFee, "the initial escrow fee was not set") 
+        });
+
+        it('should have no commission', async () => {
+            let commission = await contract.commission();
+            
+            assert.deepEqual(commission, zeroBigNumber, "the initial commission was an unexpected value") 
         });
 
         it('should not allow non-owner to set escrow fee', () => {
-            return web3.eth.expectedExceptionPromise(() => {
-                return contract.setEscrowFee(newEscrowFee, { from: sender, gas: gasToUse });
-            }, gasToUse);
+            return web3.eth.expectedExceptionPromise(() =>
+                contract.setEscrowFee(newEscrowFee, { from: sender, gas: gasToUse }), gasToUse);
         });
 
-        it('should allow owner to set escrow fee', () => {
-                return contract.setEscrowFee(newEscrowFee, { from: owner }
-            )
-            .then(() => {
-                return contract.escrowFee();
-            })
-            .then(currentEscrowFee => { 
-                assert.strictEqual(newEscrowFee.equals(currentEscrowFee), true, "the escrow fee was not set");
-            });
+        it('should allow owner to set escrow fee', async () => {
+            let txObject = await contract.setEscrowFee(newEscrowFee, { from: owner });
+            let currentEscrowFee = await contract.escrowFee();
+
+            assertEventLogSetEscrowFee(txObject, owner, newEscrowFee);
+
+            assert.deepEqual(newEscrowFee, currentEscrowFee, "the escrow fee was not set");
         });
 
         it('should not allow escrow recipient to be blank', () => {
-            return web3.eth.expectedExceptionPromise(() => {
-                return contract.escrow(0, hashedPassword, 0, { from: sender, gas: gasToUse, value: escrowAmount });
-            }, gasToUse);
+            return web3.eth.expectedExceptionPromise(() =>
+                contract.escrow(0, hashedPassword, 0, { from: sender, gas: gasToUse, value: escrowAmount }), gasToUse);
         });
 
         it('should not allow escrow recipient to be the sender', () => {
-            return web3.eth.expectedExceptionPromise(() => {
-                return contract.escrow(sender, hashedPassword, 0, { from: sender, gas: gasToUse, value: escrowAmount });
-            }, gasToUse);
+            return web3.eth.expectedExceptionPromise(() => 
+                contract.escrow(sender, hashedPassword, 0, { from: sender, gas: gasToUse, value: escrowAmount }), gasToUse);
         });
 
         it('should not allow escrow hashed password to be blank', () => {
-            return web3.eth.expectedExceptionPromise(() => {
-                return contract.escrow(recipient, 0, 0, { from: sender, gas: gasToUse, value: escrowAmount });
-            }, gasToUse);
+            return web3.eth.expectedExceptionPromise(() =>
+                contract.escrow(recipient, 0, 0, { from: sender, gas: gasToUse, value: escrowAmount }), gasToUse);
         });
 
         it('should not allow escrow to accept a zero amount', () => {
-            return web3.eth.expectedExceptionPromise(() => {
-                return contract.escrow(recipient, recipient, 0, { from: sender, gas: gasToUse, value: 0 });
-            }, gasToUse);
+            return web3.eth.expectedExceptionPromise(() =>
+                contract.escrow(recipient, recipient, 0, { from: sender, gas: gasToUse, value: 0 }), gasToUse);
         });
 
-        it('should allow escrow without deadline block', () => {
-                let expectedEscrowAmount = escrowAmount.minus(escrowFee);
+        it('should allow escrow without deadline block', async () => {
+            let expectedEscrowAmount = escrowAmount.minus(escrowFee);
+            let txObject = await contract.escrow(recipient, hashedPassword, 0, { from: sender, gas: gasToUse, value: escrowAmount });
+            let remittance = await contract.remittances(addressableHash);
+            
+            assertEventLogEscrow(txObject, sender, recipient, addressableHash, hashedPassword, 0, escrowAmount);
 
-                return contract.escrow(recipient, hashedPassword, 0, { from: sender, gas: gasToUse, value: escrowAmount }
-            )
-            .then(txObject => {
-                asertEventLogEscrow(txObject, sender, recipient, addressableHash, hashedPassword, 0, escrowAmount);
-
-                return contract.remittances(addressableHash);
-            })
-            .then(remittance => {  
-                assert.deepEqual(remittance, [ sender, recipient, expectedEscrowAmount, zeroBigNumber ], "remittance did not match expected parameters");
-            });
+            assert.deepEqual(remittance, [ sender, recipient, expectedEscrowAmount, zeroBigNumber ], "remittance did not match expected parameters");
         });
 
-        it('should allow escrow with deadline block', () => {
-                let expectedEscrowAmount = escrowAmount.minus(escrowFee);
-                let expectedBlockNumber;
+        it('should allow escrow with deadline block', async () => {
+            let expectedEscrowAmount = escrowAmount.minus(escrowFee);
+            let txObject = await contract.escrow(recipient, hashedPassword, deadlineBlock, { from: sender, gas: gasToUse, value: escrowAmount });
+            let expectedBlockNumber = deadlineBlock.plus(txObject.receipt.blockNumber);
+            let remittance = await contract.remittances(addressableHash);
+            
+            assertEventLogEscrow(txObject, sender, recipient, addressableHash, hashedPassword, deadlineBlock, escrowAmount);
 
-                return contract.escrow(recipient, hashedPassword, deadlineBlock, { from: sender, gas: gasToUse, value: escrowAmount }
-            )
-            .then(txObject => {
-                expectedBlockNumber = deadlineBlock.plus(txObject.receipt.blockNumber);
-
-                asertEventLogEscrow(txObject, sender, recipient, addressableHash, hashedPassword, deadlineBlock, escrowAmount);
-
-                return contract.remittances(addressableHash);
-            })
-            .then(remittance => {  
-                assert.deepEqual(remittance, [ sender, recipient, expectedEscrowAmount, expectedBlockNumber ], "remittance did not match expected parameters");
-            });
+            assert.deepEqual(remittance, [ sender, recipient, expectedEscrowAmount, expectedBlockNumber ], "remittance did not match expected parameters");
         });
 
-        it('should allow pushing funds into an existing escrow', () => {
-                let expectedEscrowAmount = escrowAmount.times(2).minus(escrowFee.times(2));
+        it('should allow pushing funds into an existing escrow', async () => {
+            let expectedEscrowAmount = escrowAmount.times(2).minus(escrowFee.times(2));
+            
+            let txObject = await contract.escrow(recipient, hashedPassword, 0, { from: sender, gas: gasToUse, value: escrowAmount });
+            assertEventLogEscrow(txObject, sender, recipient, addressableHash, hashedPassword, 0, escrowAmount);
 
-                return contract.escrow(recipient, hashedPassword, 0, { from: sender, gas: gasToUse, value: escrowAmount }
-            )
-            .then(() => {
-                 return contract.escrow(recipient, hashedPassword, 0, { from: sender, gas: gasToUse, value: escrowAmount });
-            })
-            .then(txObject => {
-                asertEventLogEscrow(txObject, sender, recipient, addressableHash, hashedPassword, 0, escrowAmount);
+            txObject = await contract.escrow(recipient, hashedPassword, 0, { from: sender, gas: gasToUse, value: escrowAmount });
+            assertEventLogEscrow(txObject, sender, recipient, addressableHash, hashedPassword, 0, escrowAmount);
 
-                return contract.remittances(addressableHash);
-            })
-            .then(remittance => {  
-                assert.deepEqual(remittance, [ sender, recipient, expectedEscrowAmount, zeroBigNumber ], "remittance did not match expected parameters");
-            });
+            let remittance = await contract.remittances(addressableHash);
+
+            assert.deepEqual(remittance, [ sender, recipient, expectedEscrowAmount, zeroBigNumber ], "remittance did not match expected parameters");
         });
     });
 
@@ -157,15 +141,13 @@ contract('Remittance', accounts => {
         });
 
         it('should not allow escrow fee to be set on a paused contract', () => {
-            return web3.eth.expectedExceptionPromise(() => {
-                return contract.setEscrowFee(newEscrowFee, { from: owner, gas: gasToUse });
-            }, gasToUse);
+            return web3.eth.expectedExceptionPromise(() =>
+                contract.setEscrowFee(newEscrowFee, { from: owner, gas: gasToUse }), gasToUse);
         });
 
         it('should not allow escrow on a paused contract', () => {
-            return web3.eth.expectedExceptionPromise(() => {
-                return contract.escrow(recipient, hashedPassword, 0, { from: sender, gas: gasToUse, value: escrowAmount });
-            }, gasToUse);
+            return web3.eth.expectedExceptionPromise(() => 
+                contract.escrow(recipient, hashedPassword, 0, { from: sender, gas: gasToUse, value: escrowAmount }), gasToUse);
         });
     });
 
@@ -179,86 +161,114 @@ contract('Remittance', accounts => {
         });
 
         it('should not allow escrow fee to be set on a killed contract', () => {
-            return web3.eth.expectedExceptionPromise(() => {
-                return contract.setEscrowFee(newEscrowFee, { from: owner, gas: gasToUse });
-            }, gasToUse);
+            return web3.eth.expectedExceptionPromise(() =>
+                contract.setEscrowFee(newEscrowFee, { from: owner, gas: gasToUse }), gasToUse);
         });
 
         it('should not allow escrow on a killed contract', () => {
-            return web3.eth.expectedExceptionPromise(() => {
-                return contract.escrow(recipient, hashedPassword, 0, { from: sender, gas: gasToUse, value: escrowAmount });
-            }, gasToUse);
+            return web3.eth.expectedExceptionPromise(() =>
+                contract.escrow(recipient, hashedPassword, 0, { from: sender, gas: gasToUse, value: escrowAmount }), gasToUse);
         });
     });
 
     describe("Escrow contract actions", () => {
         beforeEach("should put funds into escrow with a deadline set", () => {
             return contract.escrow(recipient, hashedPassword, deadlineBlock, { from: sender, gas: gasToUse, value: escrowAmount })
-                 .then(txObject => { asertEventLogEscrow(txObject, sender, recipient, addressableHash, hashedPassword, deadlineBlock, escrowAmount); });
+                 .then(txObject => { assertEventLogEscrow(txObject, sender, recipient, addressableHash, hashedPassword, deadlineBlock, escrowAmount); });
         });
 
         it('should not allow remitt hashed password to be blank', () => {
-            return web3.eth.expectedExceptionPromise(() => {
-                return contract.remitt(0, { from: recipient, gas: gasToUse });
-            }, gasToUse);
+            return web3.eth.expectedExceptionPromise(() =>
+                contract.remitt(0, { from: recipient, gas: gasToUse }), gasToUse);
         });
-
-        // under/over
 
         it('should not allow a third party to access a remittance using a correct hashed password', () => {
-            return web3.eth.expectedExceptionPromise(() => {
-                return contract.remitt(hashedPassword, { from: thirdParty, gas: gasToUse });
-            }, gasToUse);
+            return web3.eth.expectedExceptionPromise(() => 
+                contract.remitt(hashedPassword, { from: thirdParty, gas: gasToUse }), gasToUse);
         });
 
-        it('should not have a remittance for a third party', () => {
-                let thirdPartyAddressableHash = web3.sha3((thirdParty.slice(2)+hashedPassword.slice(2)).padStart(64, 0), { encoding: 'hex' });
+        it('should not have a remittance for a third party', async () => {
+            let thirdPartyAddressableHash = web3.sha3((thirdParty.slice(2)+hashedPassword.slice(2)).padStart(64, 0), { encoding: 'hex' });
 
-                return contract.remittances(thirdPartyAddressableHash)
-            .then(remittance => {
-                assert.deepEqual(remittance, blankRemittance, "remittance did not match expected parameters");   
-            });
+            let remittance = await contract.remittances(thirdPartyAddressableHash);
+
+            assert.deepEqual(remittance, blankRemittance, "remittance did not match expected parameters");
         });
 
-        it('should allow a remittance', () => {
-                let recipientContractBalance;
-                let recipientAccountBalance;
-                let gasCost;
-                let gasUsed;
+        it('should allow a remittance', async () => {
+            let recipientAccountBalance = await web3.eth.getBalancePromise(recipient);
+            let remittance = await contract.remittances(addressableHash);
+            let recipientContractBalance = new web3.BigNumber(remittance[2]);
 
-                return web3.eth.getBalancePromise(recipient)
-            .then(accountBalance => {
-                recipientAccountBalance = accountBalance;
+            let txObject = await contract.remitt(hashedPassword, { from: recipient });
+            let tx = await web3.eth.getTransaction(txObject.tx);
 
-                return contract.remittances(addressableHash);
-            })
-            .then(remittance => {
-                recipientContractBalance = new web3.BigNumber(remittance[2]);
+            let newRecipientAccountBalance = await web3.eth.getBalancePromise(recipient);
+            let newRemittance = await contract.remittances(addressableHash);
+            let newRecipientContractBalance = new web3.BigNumber(newRemittance[2]);
 
-                return contract.remitt(hashedPassword, { from: recipient });
-            })
-            .then(txObject => {
-                asertEventLogRemitt(txObject, recipient, hashedPassword, recipientContractBalance);
+            let gasCost = web3.eth.calculateGasCost(txObject, tx);
+            let expectedAccountBalance = recipientAccountBalance.plus(recipientContractBalance).minus(gasCost);
 
-                gasUsed = txObject.receipt.gasUsed;
+            assertEventLogRemitt(txObject, recipient, hashedPassword, recipientContractBalance);
 
-                return web3.eth.getTransaction(txObject.tx)
-            })
-            .then(tx => {
-                gasCost = tx.gasPrice.times(gasUsed);
+            assert.deepEqual(expectedAccountBalance, newRecipientAccountBalance, "the remitted amount was incorrect");
+            assert.deepEqual(newRemittance, blankRemittance, "remittance did not match expected parameters");
+        });
 
-                return web3.eth.getBalancePromise(recipient);
-            })
-            .then(accountBalance => {
-                let expectedAccountBalance = recipientAccountBalance.plus(recipientContractBalance).minus(gasCost);
+        it('should not allow non-owner to withdraw commission', () => {
+            return web3.eth.expectedExceptionPromise(() =>
+                contract.withdrawCommission({ from: thirdParty, gas: gasToUse }), gasToUse);
+        });
 
-                assert.strictEqual(expectedAccountBalance.equals(accountBalance), true, "the remitted amount was incorrect");
+        it('should allow owner to withdraw commission', async () => {
+            let ownerAccountBalance = await web3.eth.getBalancePromise(owner);
+            let ownerContractCommission = await contract.commission();
 
-                return contract.remittances(addressableHash);
-            })
-            .then(remittance => {
-                assert.deepEqual(remittance, blankRemittance, "remittance did not match expected parameters");            
-            });
+            let txObject = await contract.withdrawCommission({ from: owner });
+            let tx = await web3.eth.getTransaction(txObject.tx);
+
+            let newOwnerAccountBalance = await web3.eth.getBalancePromise(owner);
+            let newOwnerContractCommission = await contract.commission();
+
+            let gasCost = web3.eth.calculateGasCost(txObject, tx);
+            let expectedAccountBalance = ownerAccountBalance.plus(ownerContractCommission).minus(gasCost);
+
+            assertEventLogWithdrawCommission(txObject, owner, ownerContractCommission);
+
+            assert.deepEqual(expectedAccountBalance, newOwnerAccountBalance, "the withdrawn commission amount was incorrect");
+
+            assert.deepEqual(newOwnerContractCommission, zeroBigNumber, "commission was not set back to zero");
+        });
+
+        it('should not allow sender to claim before the deadline block', () => {
+            return web3.eth.expectedExceptionPromise(() => 
+                contract.claim(recipient, hashedPassword, { from: sender, gas: gasToUse }), gasToUse);
+        });
+
+        it('should allow sender to claim after the deadline block', async () => {
+            for (let i = 0; i < deadlineBlock; i++) {
+                await contract.commission.sendTransaction({from: owner});
+            }
+
+            let senderAccountBalance = await web3.eth.getBalancePromise(sender);
+            let remittance = await contract.remittances(addressableHash);
+            let senderContractBalance = new web3.BigNumber(remittance[2]);
+
+            let txObject = await contract.claim(recipient, hashedPassword, { from: sender });
+            let tx = await web3.eth.getTransaction(txObject.tx);
+
+            let newRecipientAccountBalance = await web3.eth.getBalancePromise(sender);
+            let newRemittance = await contract.remittances(addressableHash);
+            let newRecipientContractBalance = new web3.BigNumber(newRemittance[2]);
+
+            let gasCost = web3.eth.calculateGasCost(txObject, tx);
+            let expectedAccountBalance = senderAccountBalance.plus(senderContractBalance).minus(gasCost);
+
+            assertEventLogClaim(txObject, sender, recipient, hashedPassword, senderContractBalance);
+
+            assert.deepEqual(expectedAccountBalance, newRecipientAccountBalance, "the claimed amount was incorrect");
+            assert.deepEqual(newRemittance, blankRemittance, "remittance did not match expected parameters");
         });
 
         describe("Paused contract actions", () => {
@@ -267,9 +277,22 @@ contract('Remittance', accounts => {
             });
 
             it('should not allow remitt on a paused contract', () => {
-                return web3.eth.expectedExceptionPromise(() => {
-                    return contract.remitt(hashedPassword, { from: recipient, gas: gasToUse });
-                }, gasToUse);
+                return web3.eth.expectedExceptionPromise(() =>
+                    contract.remitt(hashedPassword, { from: recipient, gas: gasToUse }), gasToUse);
+            });
+
+            it('should not allow sender to claim after the deadline block on a paused contract', async () => {
+                for (let i = 0; i < deadlineBlock; i++) {
+                    await contract.commission.sendTransaction({from: owner});
+                }
+
+                await web3.eth.expectedExceptionPromise(() =>
+                    contract.claim(recipient, hashedPassword, { from: sender }), gasToUse);
+            });
+
+            it('should not allow withdraw commission on a paused contract', () => {
+                return web3.eth.expectedExceptionPromise(() =>
+                    contract.withdrawCommission({ from: owner, gas: gasToUse }), gasToUse);
             });
 
         });
@@ -284,16 +307,47 @@ contract('Remittance', accounts => {
             });
 
             it('should not allow remitt on a killed contract', () => {
-                return web3.eth.expectedExceptionPromise(() => {
-                    return contract.remitt(hashedPassword, { from: recipient, gas: gasToUse });
-                }, gasToUse);
+                return web3.eth.expectedExceptionPromise(() =>
+                    contract.remitt(hashedPassword, { from: recipient, gas: gasToUse }), gasToUse);
+            });
+
+            it('should not allow sender to claim after the deadline block on a killed contract', async () => {
+                for (let i = 0; i < deadlineBlock; i++) {
+                    await contract.commission.sendTransaction({from: owner});
+                }
+
+                await web3.eth.expectedExceptionPromise(() =>
+                    contract.claim(recipient, hashedPassword, { from: sender }), gasToUse);
+            });
+
+            it('should not allow withdraw commission on a killed contract', () => {
+                return web3.eth.expectedExceptionPromise(() =>
+                    contract.withdrawCommission({ from: owner, gas: gasToUse }), gasToUse);
             });
         });
     });
     
 });
 
-function asertEventLogEscrow(txObject, sender, recipient, addressableHash, hashedPassword, deadlineBlock, amount) {
+function assertEventLogSetEscrowFee(txObject, who, escrowFee) {
+    assert.strictEqual(txObject.logs.length, 1, "should have received 1 event");
+    assert.strictEqual(txObject.logs[0].event, "LogSetEscrowFee", "should have received LogSetEscrowFee event");
+
+    assert.strictEqual(
+        txObject.logs[0].args.who,
+        who,
+        "should be owner");
+    assert.deepEqual(
+        txObject.logs[0].args.escrowFee,
+        escrowFee,
+        "should be escrow fee");
+
+    assert.strictEqual(txObject.receipt.logs[0].topics.length, 2, "should have 2 topics");
+
+    assert.topicContainsAddress(txObject.receipt.logs[0].topics[1], who);
+}
+
+function assertEventLogEscrow(txObject, sender, recipient, addressableHash, hashedPassword, deadlineBlock, amount) {
     assert.strictEqual(txObject.logs.length, 1, "should have received 1 event");
     assert.strictEqual(txObject.logs[0].event, "LogEscrow", "should have received LogRemitt event");
 
@@ -324,19 +378,19 @@ function asertEventLogEscrow(txObject, sender, recipient, addressableHash, hashe
     
     assert.strictEqual(txObject.receipt.logs[0].topics.length, 4, "should have 4 topics");
 
-    assertTopicContainsAddress(txObject.receipt.logs[0].topics[1], sender);
-    assertTopicContainsAddress(txObject.receipt.logs[0].topics[2], recipient);
+    assert.topicContainsAddress(txObject.receipt.logs[0].topics[1], sender);
+    assert.topicContainsAddress(txObject.receipt.logs[0].topics[2], recipient);
     assert.strictEqual(txObject.receipt.logs[0].topics[3], addressableHash, "topic should match address hash");
 }
 
-function asertEventLogRemitt(txObject, recipient, hashedPassword, amount) {
+function assertEventLogRemitt(txObject, recipient, hashedPassword, amount) {
     assert.strictEqual(txObject.logs.length, 1, "should have received 1 event");
     assert.strictEqual(txObject.logs[0].event, "LogRemitt", "should have received LogRemitt event");
 
     assert.strictEqual(
         txObject.logs[0].args.recipient,
         recipient,
-        "should be sender");
+        "should be recipient");
     assert.strictEqual(
         txObject.logs[0].args.hashedPassword,
         hashedPassword,
@@ -348,14 +402,50 @@ function asertEventLogRemitt(txObject, recipient, hashedPassword, amount) {
     
     assert.strictEqual(txObject.receipt.logs[0].topics.length, 2, "should have 2 topics");
 
-    assertTopicContainsAddress(txObject.receipt.logs[0].topics[1], recipient);
+    assert.topicContainsAddress(txObject.receipt.logs[0].topics[1], recipient);
 }
 
-function assertTopicContainsAddress(topic, address) {
-    assert.strictEqual(address.length, 42, "should be 42 characters long");
-    assert.strictEqual(topic.length, 66, "should be 64 characters long");
+function assertEventLogClaim(txObject, sender, recipient, hashedPassword, amount) {
+    assert.strictEqual(txObject.logs.length, 1, "should have received 1 event");
+    assert.strictEqual(txObject.logs[0].event, "LogClaim", "should have received LogClaim event");
 
-    address = "0x" + address.substring(2).padStart(64, "0");
+    assert.strictEqual(
+        txObject.logs[0].args.sender,
+        sender,
+        "should be sender");
+    assert.strictEqual(
+        txObject.logs[0].args.recipient,
+        recipient,
+        "should be recipient");
+    assert.strictEqual(
+        txObject.logs[0].args.hashedPassword,
+        hashedPassword,
+        "should be hashed password");
+    assert.strictEqual(
+        txObject.logs[0].args.amount.equals(amount),
+        true,
+        "should be amount");
+    
+    assert.strictEqual(txObject.receipt.logs[0].topics.length, 3, "should have 2 topics");
 
-    assert.strictEqual(topic, address, "topic should match address");
+    assert.topicContainsAddress(txObject.receipt.logs[0].topics[1], sender);
+    assert.topicContainsAddress(txObject.receipt.logs[0].topics[2], recipient);
+}
+
+function assertEventLogWithdrawCommission(txObject, who, commissionBalance) {
+    assert.strictEqual(txObject.logs.length, 1, "should have received 1 event");
+    assert.strictEqual(txObject.logs[0].event, "LogWithdrawCommission", "should have received LogWithdrawCommission event");
+
+    assert.strictEqual(
+        txObject.logs[0].args.who,
+        who,
+        "should be owner");
+    assert.deepEqual(
+        txObject.logs[0].args.commissionBalance,
+        commissionBalance,
+        "should be commission balance");
+    
+    assert.strictEqual(txObject.receipt.logs[0].topics.length, 2, "should have 2 topics");
+
+    assert.topicContainsAddress(txObject.receipt.logs[0].topics[1], who);
 }
