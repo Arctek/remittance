@@ -96,15 +96,15 @@ contract('Remittance', accounts => {
 
         it('should not allow escrow to accept a zero amount', () => {
             return web3.eth.expectedExceptionPromise(() =>
-                contract.escrow(recipient, recipient, 0, { from: sender, gas: gasToUse, value: 0 }), gasToUse);
+                contract.escrow(recipient, recipient, zeroBigNumber, { from: sender, gas: gasToUse, value: 0 }), gasToUse);
         });
 
         it('should allow escrow without deadline block', async () => {
             let expectedEscrowAmount = escrowAmount.minus(escrowFee);
-            let txObject = await contract.escrow(recipient, hashedPassword, 0, { from: sender, gas: gasToUse, value: escrowAmount });
+            let txObject = await contract.escrow(recipient, hashedPassword, zeroBigNumber, { from: sender, gas: gasToUse, value: escrowAmount });
             let remittance = await contract.remittances(addressableHash);
             
-            assertEventLogEscrow(txObject, sender, recipient, addressableHash, hashedPassword, 0, escrowAmount);
+            assertEventLogEscrow(txObject, sender, recipient, addressableHash, hashedPassword, zeroBigNumber, escrowAmount);
 
             assert.deepEqual(remittance, [ sender, recipient, expectedEscrowAmount, zeroBigNumber ], "remittance did not match expected parameters");
         });
@@ -140,7 +140,7 @@ contract('Remittance', accounts => {
 
         it('should not allow escrow on a paused contract', () => {
             return web3.eth.expectedExceptionPromise(() => 
-                contract.escrow(recipient, hashedPassword, 0, { from: sender, gas: gasToUse, value: escrowAmount }), gasToUse);
+                contract.escrow(recipient, hashedPassword, zeroBigNumber, { from: sender, gas: gasToUse, value: escrowAmount }), gasToUse);
         });
     });
 
@@ -160,7 +160,7 @@ contract('Remittance', accounts => {
 
         it('should not allow escrow on a killed contract', () => {
             return web3.eth.expectedExceptionPromise(() =>
-                contract.escrow(recipient, hashedPassword, 0, { from: sender, gas: gasToUse, value: escrowAmount }), gasToUse);
+                contract.escrow(recipient, hashedPassword, zeroBigNumber, { from: sender, gas: gasToUse, value: escrowAmount }), gasToUse);
         });
     });
 
@@ -372,13 +372,13 @@ function assertEventLogEscrow(txObject, sender, recipient, addressableHash, hash
         txObject.logs[0].args.hashedPassword,
         hashedPassword,
         "should be hashed password");
-    assert.strictEqual(
-        txObject.logs[0].args.deadlineBlock.equals(deadlineBlock),
-        true,
+    assert.deepEqual(
+        txObject.logs[0].args.deadlineBlock,
+        deadlineBlock,
         "should be deadline block");
-    assert.strictEqual(
-        txObject.logs[0].args.amount.equals(amount),
-        true,
+    assert.deepEqual(
+        txObject.logs[0].args.amount,
+        amount,
         "should be amount");
     
     assert.strictEqual(txObject.receipt.logs[0].topics.length, 4, "should have 4 topics");
@@ -400,9 +400,9 @@ function assertEventLogRemitt(txObject, recipient, hashedPassword, amount) {
         txObject.logs[0].args.hashedPassword,
         hashedPassword,
         "should be hashed password");
-    assert.strictEqual(
-        txObject.logs[0].args.amount.equals(amount),
-        true,
+    assert.deepEqual(
+        txObject.logs[0].args.amount,
+        amount,
         "should be amount");
     
     assert.strictEqual(txObject.receipt.logs[0].topics.length, 2, "should have 2 topics");
@@ -426,9 +426,9 @@ function assertEventLogClaim(txObject, sender, recipient, hashedPassword, amount
         txObject.logs[0].args.hashedPassword,
         hashedPassword,
         "should be hashed password");
-    assert.strictEqual(
-        txObject.logs[0].args.amount.equals(amount),
-        true,
+    assert.deepEqual(
+        txObject.logs[0].args.amount,
+        amount,
         "should be amount");
     
     assert.strictEqual(txObject.receipt.logs[0].topics.length, 3, "should have 2 topics");
