@@ -70,6 +70,8 @@ contract Remittance is Killable{
 
         // This remittance entry could already exist, allow topping it up
         if (remittances[addressableHash].balance > 0) {
+            require(remittances[addressableHash].balance + remittanceBalance > remittances[addressableHash].balance);
+
             remittances[addressableHash].balance += remittanceBalance;
         }
         else {
@@ -99,6 +101,11 @@ contract Remittance is Killable{
 
         uint withdrawBalance = remittances[addressableHash].balance;
         remittances[addressableHash].balance = 0;
+
+        // Also be nice and clean up the blockchain state
+        remittances[addressableHash].sender = 0;
+        remittances[addressableHash].recipient = 0;
+        remittances[addressableHash].deadlineBlock = 0;
 
         msg.sender.transfer(withdrawBalance);
 

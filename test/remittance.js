@@ -22,6 +22,11 @@ contract('Remittance', accounts => {
     const newEscrowFee = escrowAmount.dividedBy(22).round();
     const deadlineBlock = new web3.BigNumber(Math.floor(Math.random() * 5) + 1);
 
+    const zeroAddress = ("0x").padEnd(42, 0);
+    const zeroBigNumber = new web3.BigNumber(0);
+
+    const blankRemittance = [ zeroAddress, zeroAddress, zeroBigNumber, zeroBigNumber ];
+
     let owner, sender, recipient, thirdParty, addressableHash;
 
     const password = Math.random().toString(36).slice(2); // alice should give this to carol
@@ -105,7 +110,7 @@ contract('Remittance', accounts => {
                 return contract.remittances(addressableHash);
             })
             .then(remittance => {  
-                assert.deepEqual(remittance, [ sender, recipient, expectedEscrowAmount, (new web3.BigNumber(0)) ], "remittance did not match expected parameters");
+                assert.deepEqual(remittance, [ sender, recipient, expectedEscrowAmount, zeroBigNumber ], "remittance did not match expected parameters");
             });
         });
 
@@ -141,7 +146,7 @@ contract('Remittance', accounts => {
                 return contract.remittances(addressableHash);
             })
             .then(remittance => {  
-                assert.deepEqual(remittance, [ sender, recipient, expectedEscrowAmount, (new web3.BigNumber(0)) ], "remittance did not match expected parameters");
+                assert.deepEqual(remittance, [ sender, recipient, expectedEscrowAmount, zeroBigNumber ], "remittance did not match expected parameters");
             });
         });
     });
@@ -188,7 +193,8 @@ contract('Remittance', accounts => {
 
     describe("Escrow contract actions", () => {
         beforeEach("should put funds into escrow with a deadline set", () => {
-            return contract.escrow(recipient, hashedPassword, deadlineBlock, { from: sender, gas: gasToUse, value: escrowAmount });
+            return contract.escrow(recipient, hashedPassword, deadlineBlock, { from: sender, gas: gasToUse, value: escrowAmount })
+                 .then(txObject => { asertEventLogEscrow(txObject, sender, recipient, addressableHash, hashedPassword, deadlineBlock, escrowAmount); });
         });
 
         it('should not allow remitt hashed password to be blank', () => {
@@ -197,10 +203,62 @@ contract('Remittance', accounts => {
             }, gasToUse);
         });
 
+        // under/over
+
         it('should not allow a third party to access a remittance using a correct hashed password', () => {
             return web3.eth.expectedExceptionPromise(() => {
                 return contract.remitt(hashedPassword, { from: thirdParty, gas: gasToUse });
             }, gasToUse);
+        });
+
+        it('should not have a remittance for a third party', () => {
+                let thirdPartyAddressableHash = web3.sha3((thirdParty.slice(2)+hashedPassword.slice(2)).padStart(64, 0), { encoding: 'hex' });
+
+                return contract.remittances(thirdPartyAddressableHash)
+            .then(remittance => {
+                assert.deepEqual(remittance, blankRemittance, "remittance did not match expected parameters");   
+            });
+        });
+
+        it('should allow a remittance', () => {
+                let recipientContractBalance;
+                let recipientAccountBalance;
+                let gasCost;
+                let gasUsed;
+
+                return web3.eth.getBalancePromise(recipient)
+            .then(accountBalance => {
+                recipientAccountBalance = accountBalance;
+
+                return contract.remittances(addressableHash);
+            })
+            .then(remittance => {
+                recipientContractBalance = new web3.BigNumber(remittance[2]);
+
+                return contract.remitt(hashedPassword, { from: recipient });
+            })
+            .then(txObject => {
+                asertEventLogRemitt(txObject, recipient, hashedPassword, recipientContractBalance);
+
+                gasUsed = txObject.receipt.gasUsed;
+
+                return web3.eth.getTransaction(txObject.tx)
+            })
+            .then(tx => {
+                gasCost = tx.gasPrice.times(gasUsed);
+
+                return web3.eth.getBalancePromise(recipient);
+            })
+            .then(accountBalance => {
+                let expectedAccountBalance = recipientAccountBalance.plus(recipientContractBalance).minus(gasCost);
+
+                assert.strictEqual(expectedAccountBalance.equals(accountBalance), true, "the remitted amount was incorrect");
+
+                return contract.remittances(addressableHash);
+            })
+            .then(remittance => {
+                assert.deepEqual(remittance, blankRemittance, "remittance did not match expected parameters");            
+            });
         });
 
         describe("Paused contract actions", () => {
@@ -269,6 +327,28 @@ function asertEventLogEscrow(txObject, sender, recipient, addressableHash, hashe
     assertTopicContainsAddress(txObject.receipt.logs[0].topics[1], sender);
     assertTopicContainsAddress(txObject.receipt.logs[0].topics[2], recipient);
     assert.strictEqual(txObject.receipt.logs[0].topics[3], addressableHash, "topic should match address hash");
+}
+
+function asertEventLogRemitt(txObject, recipient, hashedPassword, amount) {
+    assert.strictEqual(txObject.logs.length, 1, "should have received 1 event");
+    assert.strictEqual(txObject.logs[0].event, "LogRemitt", "should have received LogRemitt event");
+
+    assert.strictEqual(
+        txObject.logs[0].args.recipient,
+        recipient,
+        "should be sender");
+    assert.strictEqual(
+        txObject.logs[0].args.hashedPassword,
+        hashedPassword,
+        "should be hashed password");
+    assert.strictEqual(
+        txObject.logs[0].args.amount.equals(amount),
+        true,
+        "should be amount");
+    
+    assert.strictEqual(txObject.receipt.logs[0].topics.length, 2, "should have 2 topics");
+
+    assertTopicContainsAddress(txObject.receipt.logs[0].topics[1], recipient);
 }
 
 function assertTopicContainsAddress(topic, address) {
