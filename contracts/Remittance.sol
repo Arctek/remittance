@@ -62,21 +62,15 @@ contract Remittance is Killable{
 
         bytes32 addressableHash = keccak256(recipient, hashedPassword);
 
+        // Else the deadline can be overridden later
+        require(remittances[addressableHash].balance == 0);
+
         commission = commission + escrowFee;
         uint remittanceBalance = msg.value - escrowFee;
 
         remittances[addressableHash].sender = msg.sender;
         remittances[addressableHash].recipient = recipient;
-
-        // This remittance entry could already exist, allow topping it up
-        if (remittances[addressableHash].balance > 0) {
-            require(remittances[addressableHash].balance + remittanceBalance > remittances[addressableHash].balance);
-
-            remittances[addressableHash].balance += remittanceBalance;
-        }
-        else {
-            remittances[addressableHash].balance = remittanceBalance;
-        }
+        remittances[addressableHash].balance = remittanceBalance;
 
         if (deadlineBlock > 0) {
             remittances[addressableHash].deadlineBlock = block.number + deadlineBlock;

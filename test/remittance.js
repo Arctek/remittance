@@ -120,18 +120,11 @@ contract('Remittance', accounts => {
             assert.deepEqual(remittance, [ sender, recipient, expectedEscrowAmount, expectedBlockNumber ], "remittance did not match expected parameters");
         });
 
-        it('should allow pushing funds into an existing escrow', async () => {
-            let expectedEscrowAmount = escrowAmount.times(2).minus(escrowFee.times(2));
-            
-            let txObject = await contract.escrow(recipient, hashedPassword, 0, { from: sender, gas: gasToUse, value: escrowAmount });
-            assertEventLogEscrow(txObject, sender, recipient, addressableHash, hashedPassword, 0, escrowAmount);
+        it('should not allow pushing funds into an existing escrow', async () => {
+            await contract.escrow(recipient, hashedPassword, deadlineBlock, { from: sender, gas: gasToUse, value: escrowAmount });
 
-            txObject = await contract.escrow(recipient, hashedPassword, 0, { from: sender, gas: gasToUse, value: escrowAmount });
-            assertEventLogEscrow(txObject, sender, recipient, addressableHash, hashedPassword, 0, escrowAmount);
-
-            let remittance = await contract.remittances(addressableHash);
-
-            assert.deepEqual(remittance, [ sender, recipient, expectedEscrowAmount, zeroBigNumber ], "remittance did not match expected parameters");
+            await web3.eth.expectedExceptionPromise(() =>
+                contract.escrow(recipient, hashedPassword, deadlineBlock, { from: sender, gas: gasToUse, value: escrowAmount }), gasToUse);
         });
     });
 
