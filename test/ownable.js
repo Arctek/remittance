@@ -13,6 +13,7 @@ web3.eth.expectedPayableExceptionPromise = require("../test_util/expectedPayable
 web3.eth.expectedExceptionPromise = require("../test_util/expectedExceptionPromise.js");
 web3.eth.makeSureAreUnlocked = require("../test_util/makeSureAreUnlocked.js");
 web3.eth.makeSureHasAtLeast = require("../test_util/makeSureHasAtLeast.js");
+assert.topicContainsAddress = require("../test_util/topicContainsAddress.js");
 
 contract('Ownable', accounts => {
     const gasToUse = 3000000;
@@ -51,11 +52,11 @@ contract('Ownable', accounts => {
                 txObject.logs[0].args.newOwner,
                 bob,
                 "should be the new owner");
-            // oldOwner and newOwner should be indexed
+            
             assert.equal(txObject.receipt.logs[0].topics.length, 3, "should have 3 topics");
 
-            assertTopicContainsAddress(txObject.receipt.logs[0].topics[1], owner);
-            assertTopicContainsAddress(txObject.receipt.logs[0].topics[2], bob);
+            assert.topicContainsAddress(txObject.receipt.logs[0].topics[1], owner);
+            assert.topicContainsAddress(txObject.receipt.logs[0].topics[2], bob);
 
             return contract.owner();
         })
@@ -65,24 +66,15 @@ contract('Ownable', accounts => {
     });
 
     it('should not allow non-owner to set owner', () => {
-        return web3.eth.expectedExceptionPromise(() => {
-            return contract.setOwner(bob, { from: bob, gas: gasToUse });
-        }, gasToUse);
+        return web3.eth.expectedExceptionPromise(() => 
+            contract.setOwner(bob, { from: bob, gas: gasToUse }),
+        gasToUse);
     });
 
     it('should not allow owner to set owner to itself', () => {
-        return web3.eth.expectedExceptionPromise(() => {
-            return contract.setOwner(owner, { from: owner, gas: gasToUse });
-        }, gasToUse);
+        return web3.eth.expectedExceptionPromise(() => 
+            contract.setOwner(owner, { from: owner, gas: gasToUse }),
+        gasToUse);
     });
 
 });
-
-function assertTopicContainsAddress(topic, address) {
-    assert.strictEqual(address.length, 42, "should be 42 characters long");
-    assert.strictEqual(topic.length, 66, "should be 64 characters long");
-
-    address = "0x" + address.substring(2).padStart(64, "0");
-
-    assert.strictEqual(topic, address, "topic should match address");
-}
