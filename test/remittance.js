@@ -3,7 +3,6 @@
 const Remittance = artifacts.require("./Remittance.sol");
 
 import { default as Promise } from 'bluebird';
-import sha3 from 'solidity-sha3';
 
 if (typeof web3.eth.getBlockPromise !== "function") {
     Promise.promisifyAll(web3.eth, { suffix: "Promise" });
