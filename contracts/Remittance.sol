@@ -126,6 +126,7 @@ contract Remittance is Killable{
         require(remittances[addressableHash].sender == msg.sender);
         require(remittances[addressableHash].recipient == recipient);
         require(remittances[addressableHash].balance > 0);
+        require(remittances[addressableHash].deadlineBlock > 0);
         require(remittances[addressableHash].deadlineBlock <= block.number);
 
         uint withdrawBalance = remittances[addressableHash].balance;

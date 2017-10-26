@@ -171,6 +171,18 @@ contract('Remittance', accounts => {
         });
     });
 
+    describe("No deadline actions", () => {
+        beforeEach("should put funds into escrow without a deadline set", () => {
+            return contract.escrow(recipient, hashedPassword, zeroBigNumber, { from: sender, gas: gasToUse, value: escrowAmount })
+                 .then(txObject => { assertEventLogEscrow(txObject, sender, recipient, addressableHash, hashedPassword, zeroBigNumber, escrowAmount); });
+        });
+
+        it('should not allow sender to claim when no deadline block has been set', () => {
+            return web3.eth.expectedExceptionPromise(() => 
+                contract.claim(recipient, hashedPassword, { from: sender, gas: gasToUse }), gasToUse);
+        });
+    });
+
     describe("Escrow contract actions", () => {
         beforeEach("should put funds into escrow with a deadline set", () => {
             return contract.escrow(recipient, hashedPassword, deadlineBlock, { from: sender, gas: gasToUse, value: escrowAmount })
