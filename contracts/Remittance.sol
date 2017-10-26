@@ -10,14 +10,15 @@ contract Remittance is Killable{
         uint deadlineBlock;
     }
 
-    mapping (bytes32 => RemittanceStruct) remmittances;
-    uint escrowFee;
-    uint commission;
+    mapping (bytes32 => RemittanceStruct) public remittances;
+    uint public escrowFee;
+    uint public commission;
 
-    event LogEscrow(address indexed sender, address indexed recipient, bytes32 hashedPassword, uint deadlineBlock);
-    event LogRemitt(address indexed recipient, bytes32 hashedPassword, uint balance);
-    event LogClaim(address indexed sender, address indexed recipient, bytes32 hashedPassword, uint balance);
+    event LogEscrow(address indexed sender, address indexed recipient, bytes32 indexed addressableHash, bytes32 hashedPassword, uint deadlineBlock, uint amount);
+    event LogRemitt(address indexed recipient, bytes32 hashedPassword, uint amount);
+    event LogClaim(address indexed sender, address indexed recipient, bytes32 hashedPassword, uint amount);
     event LogWithdrawCommission(address indexed who, uint commissionBalance);
+    event LogSetEscrowFee(address indexed who, uint escrowFee);
 
     modifier hashedPasswordNotBlank(bytes32 hashedPassword){
         require(hashedPassword != 0);
@@ -34,6 +35,20 @@ contract Remittance is Killable{
         escrowFee = contractEscrowFee;
     }
 
+    function setEscrowFee(uint contractEscrowFee)
+        public
+        isOwner
+        isNotPaused
+        isNotKilled
+        returns(bool success)
+    {
+        escrowFee = contractEscrowFee;
+
+        LogSetEscrowFee(msg.sender, contractEscrowFee);
+
+        return true;
+    }
+
     function escrow(address recipient, bytes32 hashedPassword, uint deadlineBlock)
         public
         isNotPaused
@@ -43,23 +58,29 @@ contract Remittance is Killable{
         payable
         returns(bool success)
     {
-        require(toBytes(recipient) != hashedPassword);
         require(msg.value > 0);
 
         bytes32 addressableHash = keccak256(recipient, hashedPassword);
 
         commission = commission + escrowFee;
-        uint remmittanceBalance = msg.value - escrowFee;
+        uint remittanceBalance = msg.value - escrowFee;
 
-        remmittances[addressableHash].sender = msg.sender;
-        remmittances[addressableHash].recipient = recipient;
-        remmittances[addressableHash].balance = remmittanceBalance;
+        remittances[addressableHash].sender = msg.sender;
+        remittances[addressableHash].recipient = recipient;
 
-        if (deadlineBlock > 0) {
-            remmittances[addressableHash].deadlineBlock = block.number + deadlineBlock;
+        // This remittance entry could already exist, allow topping it up
+        if (remittances[addressableHash].balance > 0) {
+            remittances[addressableHash].balance += remittanceBalance;
+        }
+        else {
+            remittances[addressableHash].balance = remittanceBalance;
         }
 
-        LogEscrow(msg.sender, recipient, hashedPassword, deadlineBlock);
+        if (deadlineBlock > 0) {
+            remittances[addressableHash].deadlineBlock = block.number + deadlineBlock;
+        }
+
+        LogEscrow(msg.sender, recipient, addressableHash, hashedPassword, deadlineBlock, msg.value);
 
         return true;
     }
@@ -73,11 +94,11 @@ contract Remittance is Killable{
     {
         bytes32 addressableHash = keccak256(msg.sender, hashedPassword);
 
-        require(remmittances[addressableHash].recipient == msg.sender);
-        require(remmittances[addressableHash].balance > 0);
+        require(remittances[addressableHash].recipient == msg.sender);
+        require(remittances[addressableHash].balance > 0);
 
-        uint withdrawBalance = remmittances[addressableHash].balance;
-        remmittances[addressableHash].balance = 0;
+        uint withdrawBalance = remittances[addressableHash].balance;
+        remittances[addressableHash].balance = 0;
 
         msg.sender.transfer(withdrawBalance);
 
@@ -96,13 +117,13 @@ contract Remittance is Killable{
     {
         bytes32 addressableHash = keccak256(recipient, hashedPassword);
 
-        require(remmittances[addressableHash].sender == msg.sender);
-        require(remmittances[addressableHash].recipient == recipient);
-        require(remmittances[addressableHash].balance > 0);
-        require(remmittances[addressableHash].deadlineBlock >= block.number);
+        require(remittances[addressableHash].sender == msg.sender);
+        require(remittances[addressableHash].recipient == recipient);
+        require(remittances[addressableHash].balance > 0);
+        require(remittances[addressableHash].deadlineBlock >= block.number);
 
-        uint withdrawBalance = remmittances[addressableHash].balance;
-        remmittances[addressableHash].balance = 0;
+        uint withdrawBalance = remittances[addressableHash].balance;
+        remittances[addressableHash].balance = 0;
 
         msg.sender.transfer(withdrawBalance);
 
@@ -128,14 +149,5 @@ contract Remittance is Killable{
         LogWithdrawCommission(msg.sender, comssionBalance);
 
         return true;
-    }
-
-    function toBytes(address a) constant returns (bytes32 b){
-       assembly {
-            let m := mload(0x40)
-            mstore(add(m, 20), xor(0x140000000000000000000000000000000000000000, a))
-            mstore(0x40, add(m, 52))
-            b := m
-       }
     }
 }

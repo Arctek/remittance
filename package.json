@@ -16,6 +16,7 @@
     "babel-preset-env": "^1.6.1",
     "babel-register": "^6.26.0",
     "bluebird": "^3.5.1",
+    "ethereumjs-util": "^5.1.2",
     "lodash": "^4.17.4"
   }
 }
