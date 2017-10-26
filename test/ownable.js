@@ -41,6 +41,7 @@ contract('Ownable', accounts => {
         return contract.setOwner(bob, { from: owner }
         ).then(txObject => {
             assert.equal(txObject.logs.length, 1, "should have received 1 event");
+            assert.strictEqual(txObject.logs[0].event, "LogSetOwner", "should have received LogSetOwner event");
             
             assert.strictEqual(
                 txObject.logs[0].args.oldOwner,
@@ -52,6 +53,9 @@ contract('Ownable', accounts => {
                 "should be the new owner");
             // oldOwner and newOwner should be indexed
             assert.equal(txObject.receipt.logs[0].topics.length, 3, "should have 3 topics");
+
+            assertTopicContainsAddress(txObject.receipt.logs[0].topics[1], owner);
+            assertTopicContainsAddress(txObject.receipt.logs[0].topics[2], bob);
 
             return contract.owner();
         })
@@ -73,3 +77,12 @@ contract('Ownable', accounts => {
     });
 
 });
+
+function assertTopicContainsAddress(topic, address) {
+    assert.strictEqual(address.length, 42, "should be 42 characters long");
+    assert.strictEqual(topic.length, 66, "should be 64 characters long");
+
+    address = "0x" + address.substring(2).padStart(64, "0");
+
+    assert.strictEqual(topic, address, "topic should match address");
+}
